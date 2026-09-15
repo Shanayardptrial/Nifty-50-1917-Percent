@@ -19,9 +19,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "live_paper_trades.csv")
 STATE_FILE = os.path.join(BASE_DIR, "bot_state.json")
 
-# Optional: Telegram Alerts (Leave empty if not using)
-TELEGRAM_BOT_TOKEN = "" 
-TELEGRAM_CHAT_ID = ""
+# Telegram Alerts Configuration
+TELEGRAM_BOT_TOKEN = "8859909604:AAH7TtJlGQetefXLXrJ6W3jOIvF9pVdXH3Q" 
+TELEGRAM_CHAT_ID = "6680606934"
 
 def std_norm_cdf(x):
     """Pure Python Standard Normal CDF using math.erf (No scipy needed)"""
