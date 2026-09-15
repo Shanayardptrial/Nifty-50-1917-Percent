@@ -1,0 +1,37 @@
+name: Live Nifty Paper Trader Bot
+
+on:
+  schedule:
+    # Run every 15 mins during Indian Market Hours (Mon-Fri, 03:45 UTC to 10:00 UTC = 09:15 IST to 15:30 IST)
+    - cron: '*/15 3-10 * * 1-5'
+  workflow_dispatch: # Allows manual trigger anytime from GitHub UI
+
+jobs:
+  run-paper-trader:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy
+
+      - name: Run Live Paper Trader Bot
+        run: |
+          python live_paper_trader_bot.py
+
+      - name: Commit & Push Updated Trade State & Logs
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add bot_state.json live_paper_trades.csv
+          git commit -m "Auto-update live paper trade logs [skip ci]" || exit 0
+          git push
