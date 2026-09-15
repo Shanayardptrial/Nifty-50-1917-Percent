@@ -1,0 +1,98 @@
+//@version=5
+strategy("Black-Scholes 15m Option Buyer Strategy [Long Only]", overlay=true, initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_type=strategy.commission.percent, commission_value=0.01, process_orders_on_close=true)
+
+// Enforce Option Buyer Constraints: ONLY LONG TRADES ALLOWED (NO SHORTING)
+strategy.risk.allow_entry_in(strategy.direction.long)
+
+// =============================================================================
+// INPUT PARAMETERS (OPTION BUYER: LARGE TARGET, SMALL SL)
+// =============================================================================
+r                 = input.float(0.065, "Risk-Free Rate (r)", group="Black-Scholes Model")
+erp               = input.float(0.040, "Equity Risk Premium (ERP)", group="Black-Scholes Model")
+gk_period         = input.int(10, "Garman-Klass Volatility Lookback", group="Black-Scholes Model")
+vr_period         = input.int(50, "Volatility Ratio Baseline Period", group="Black-Scholes Model")
+
+sl_pct            = input.float(0.15, "Small Stop Loss (%) (~35 Nifty Pts)", group="Risk Management") / 100.0
+tp_pct            = input.float(0.65, "Large Take Profit (%) (~155 Nifty Pts)", group="Risk Management") / 100.0
+be_trigger_pct    = input.float(0.25, "Breakeven Lock Trigger (%) (~60 Nifty Pts)", group="Risk Management") / 100.0
+
+// =============================================================================
+// 6-DECIMAL PRECISION BLACK-SCHOLES STANDARD NORMAL CDF N(x)
+// =============================================================================
+norm_cdf(x) =>
+    k = 1.0 / (1.0 + 0.2316419 * math.abs(x))
+    poly = k * (0.319381530 + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + 1.330274429 * k))))
+    approx = 1.0 - (1.0 / math.sqrt(2.0 * 3.141592653589793)) * math.exp(-0.5 * x * x) * poly
+    x >= 0 ? approx : 1.0 - approx
+
+// =============================================================================
+// 1. GARMAN-KLASS CONTINUOUS INTRADAY VOLATILITY (15-MIN BARS)
+// =============================================================================
+log_hl = math.log(high / low)
+log_co = math.log(close / open)
+gk_var = 0.5 * math.pow(log_hl, 2) - (2.0 * math.log(2.0) - 1.0) * math.pow(log_co, 2)
+
+// Annualized 15-minute Garman-Klass volatility (6,300 15-min bars/year)
+sigma_gk = math.sqrt(ta.sma(gk_var, gk_period) * 6300.0)
+vol_ratio = sigma_gk / ta.sma(sigma_gk, vr_period)
+
+// =============================================================================
+// 2. MULTI-HORIZON BLACK-SCHOLES DELTA DERIVATION N(d1)
+// =============================================================================
+drift = r + erp
+T_15m = 1.0 / 6300.0  // 15 mins
+T_1h  = 4.0 / 6300.0  // 1 hour
+
+S0_15m = close[1]
+S0_1h  = close[4]
+
+d1_15m = (math.log(close / S0_15m) + (drift + 0.5 * math.pow(sigma_gk, 2)) * T_15m) / (sigma_gk * math.sqrt(T_15m))
+d1_1h  = (math.log(close / S0_1h)  + (drift + 0.5 * math.pow(sigma_gk, 2)) * T_1h)  / (sigma_gk * math.sqrt(T_1h))
+
+delta_15m = norm_cdf(d1_15m)
+delta_1h  = norm_cdf(d1_1h)
+
+// Trend Filter (20 EMA on 15m)
+ema_20 = ta.ema(close, 20)
+is_bull_trend = close > ema_20
+
+// =============================================================================
+// 3. OPTION BUYER CONFLATION SIGNALS (BULLISH DELTA EXPANSION ONLY)
+// =============================================================================
+t_min = time(timeframe.period, "0915-1415")
+is_entry_window = not na(t_min)
+is_eod = time(timeframe.period, "1515-1530")
+
+conflation_buy = is_bull_trend and (delta_1h > 0.55) and (delta_15m > 0.55) and (vol_ratio > 0.90)
+
+// =============================================================================
+// 4. STRATEGY EXECUTION (BUY ONLY: LARGE TARGET +155 PTS, SMALL SL -35 PTS)
+// =============================================================================
+var float entry_price = na
+var float current_sl   = na
+var float current_tp   = na
+var bool  be_active    = false
+
+is_just_entered = strategy.position_size[1] == 0 and strategy.position_size > 0
+
+if strategy.position_size == 0
+    if is_entry_window and conflation_buy
+        strategy.entry("BS_Call_Buyer", strategy.long)
+
+if is_just_entered
+    entry_price := strategy.opentrades.entry_price(0)
+    current_sl  := entry_price * (1.0 - sl_pct)
+
+if strategy.position_size > 0 and not is_just_entered
+    // Continuous Trailing Stop Loss
+    current_sl := math.max(current_sl, high * (1.0 - sl_pct))
+    strategy.exit("Exit_Buyer", "BS_Call_Buyer", stop=current_sl)
+    
+    if not na(is_eod)
+        strategy.close("BS_Call_Buyer", comment="EOD_Exit")
+
+// =============================================================================
+// VISUALIZATION
+// =============================================================================
+plot(ema_20, title="EMA 20 Trend Filter", color=color.orange, linewidth=2)
+plotshape(conflation_buy and strategy.position_size == 0 and is_entry_window, title="Option Buy Entry", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.normal)
