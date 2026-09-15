@@ -10,6 +10,8 @@ An advanced Quantitative Black-Scholes Delta Expansion & Garman-Klass Volatility
 * **Risk-Reward Ratio**: 1 : 4.3 (Asymmetric High Payoff Strategy)
 * **Max Drawdown**: -24.03%
 
+![Nifty 50 Strategy Backtest Chart](backtest_chart_v1.png)
+
 ## 📂 Repository Contents
 * `bs_nifty_option_buyer_15m.pine`: TradingView Pine Script (v5) implementation.
 * `backtest_version_1_2026.py`: Full Python backtest engine using Black-Scholes Delta & Garman-Klass Volatility math.
