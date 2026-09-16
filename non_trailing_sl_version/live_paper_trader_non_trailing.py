@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 # ==========================================
-# CONFIGURATION
+# CONFIGURATION - NON-TRAILING SL (FIXED SL & TARGET)
 # ==========================================
 SYMBOL = "%5ENSEI"  # Nifty 50 Index (^NSEI)
 LOT_SIZE = 65       # 1 Lot Nifty (65 Qty)
@@ -16,15 +16,13 @@ INITIAL_CAPITAL = 15000.0
 SL_SPOT_POINTS = 35.0
 TARGET_SPOT_POINTS = 150.0
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(BASE_DIR, "live_paper_trades.csv")
-STATE_FILE = os.path.join(BASE_DIR, "bot_state.json")
+LOG_FILE = os.path.join(BASE_DIR, "live_paper_trades_non_trailing.csv")
+STATE_FILE = os.path.join(BASE_DIR, "bot_state_non_trailing.json")
 
-# Telegram Alerts Configuration
 TELEGRAM_BOT_TOKEN = "8859909604:AAH7TtJlGQetefXLXrJ6W3jOIvF9pVdXH3Q" 
 TELEGRAM_CHAT_ID = "6680606934"
 
 def std_norm_cdf(x):
-    """Pure Python Standard Normal CDF using math.erf (No scipy needed)"""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 def send_telegram(message):
@@ -37,27 +35,19 @@ def send_telegram(message):
         except Exception as e:
             print(f"Telegram error: {e}")
 
-# ==========================================
-# BLACK-SCHOLES OPTION PRICING ENGINE
-# ==========================================
 def calculate_option_price(spot, strike, option_type, days_to_expiry=4, iv=0.14, r=0.07):
     T = max(days_to_expiry / 365.0, 0.001)
     d1 = (math.log(spot / strike) + (r + 0.5 * iv**2) * T) / (iv * math.sqrt(T))
     d2 = d1 - iv * math.sqrt(T)
-    
     if option_type == 'CE':
         price = spot * std_norm_cdf(d1) - strike * math.exp(-r * T) * std_norm_cdf(d2)
         delta = std_norm_cdf(d1)
     else:
-        price = strike * math.exp(-r * T) * std_norm_cdf(-d2) - spot * std_norm_cdf(-d1)
+        price = strike * math.exp(-r * T) * std_norm_cdf(-d2) - spot * math.exp(-r * T) * std_norm_cdf(-d1)
         delta = std_norm_cdf(d1) - 1.0
-        
     return max(round(price, 2), 2.0), round(abs(delta), 3)
 
-# ==========================================
-# BOT ENGINE
-# ==========================================
-class LivePaperTraderBot:
+class LivePaperTraderNonTrailingBot:
     def __init__(self):
         self.capital = INITIAL_CAPITAL
         self.active_trade = None
@@ -78,18 +68,11 @@ class LivePaperTraderBot:
             json.dump({"capital": self.capital, "active_trade": self.active_trade}, f, indent=4)
 
     def fetch_live_data(self):
-        """Fetch 15m OHLC bar data with resilient direct endpoints (No yfinance bug)"""
         urls = [
             f"https://query2.finance.yahoo.com/v8/finance/chart/{SYMBOL}?range=5d&interval=15m",
             f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?range=5d&interval=15m"
         ]
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Cache-Control': 'no-cache'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
 
         for url in urls:
             try:
@@ -111,8 +94,6 @@ class LivePaperTraderBot:
                         return df
             except Exception:
                 continue
-        
-        print("Error fetching live data: Retrying next cycle...")
         return None
 
     def evaluate_signals(self, df):
@@ -126,10 +107,8 @@ class LivePaperTraderBot:
 
         last_bar = df.iloc[-1]
         prev_bar = df.iloc[-2]
-
         close = last_bar['Close']
         
-        # Signal logic: 15m Breakout + GK Volatility Acceleration
         is_bullish = (close > prev_bar['High']) and (last_bar['gk_vol'] > last_bar['ma_vol'])
         is_bearish = (close < prev_bar['Low']) and (last_bar['gk_vol'] > last_bar['ma_vol'])
 
@@ -147,9 +126,9 @@ class LivePaperTraderBot:
             return
 
         signal, spot = self.evaluate_signals(df)
-        print(f"[{now_str}] NIFTY Spot: {spot:.2f} | Signal: {signal if signal else 'NONE'} | Capital: RS {self.capital:.2f}")
+        print(f"[{now_str}] [NON-TRAILING SL BOT] Spot: {spot:.2f} | Signal: {signal if signal else 'NONE'} | Capital: RS {self.capital:.2f}")
 
-        # Update Active Trade
+        # Update Active Trade (FIXED SL & TP)
         if self.active_trade:
             opt_type = self.active_trade['type']
             strike = self.active_trade['strike']
@@ -167,11 +146,11 @@ class LivePaperTraderBot:
                 hit_tp = spot <= target_spot
 
             if hit_tp or hit_sl:
-                reason = "TARGET HIT (+1:4.3 RR)" if hit_tp else "SL HIT (-35 Pts)"
+                reason = "TARGET HIT (+150 Pts)" if hit_tp else "FIXED SL HIT (-35 Pts)"
                 pnl = (opt_price - self.active_trade['entry_price']) * LOT_SIZE
                 self.capital += pnl
                 
-                msg = (f"🚨 *EXIT TRADE ({reason})*\n"
+                msg = (f"🚨 *EXIT TRADE FIXED SL/TP ({reason})*\n"
                        f"Type: {opt_type} {strike}\n"
                        f"Exit Option Price: ₹{opt_price}\n"
                        f"Spot: {spot:.2f}\n"
@@ -189,12 +168,11 @@ class LivePaperTraderBot:
                     'capital': round(self.capital, 2)
                 }])
                 log_df.to_csv(LOG_FILE, mode='a', header=not os.path.exists(LOG_FILE), index=False)
-                
                 self.active_trade = None
                 self.save_state()
 
         # Enter New Trade
-        elif signal is not None:
+        if self.active_trade is None and signal is not None:
             opt_type = signal
             strike = round(spot / 100) * 100
             strike = strike - 100 if opt_type == 'CE' else strike + 100
@@ -213,16 +191,24 @@ class LivePaperTraderBot:
                     'investment': cost
                 }
                 self.save_state()
-                msg = (f"🚀 *NEW LIVE PAPER TRADE*\n"
+                msg = (f"🚀 *NEW LIVE PAPER TRADE (NON-TRAILING)*\n"
                        f"Type: {opt_type} {strike}\n"
                        f"Spot: {spot:.2f}\n"
                        f"Option Premium: ₹{opt_price} (Delta: {delta})\n"
-                       f"1 Lot (25 Qty) Cost: ₹{cost:.2f}\n"
-                       f"SL Spot: {spot - SL_SPOT_POINTS if opt_type=='CE' else spot + SL_SPOT_POINTS:.2f}\n"
-                       f"Target Spot: {spot + TARGET_SPOT_POINTS if opt_type=='CE' else spot - TARGET_SPOT_POINTS:.2f}")
+                       f"1 Lot (65 Qty) Cost: ₹{cost:.2f}\n"
+                       f"Target Spot: {spot + TARGET_SPOT_POINTS if opt_type=='CE' else spot - TARGET_SPOT_POINTS:.2f}\n"
+                       f"SL Spot: {spot - SL_SPOT_POINTS if opt_type=='CE' else spot + SL_SPOT_POINTS:.2f}")
                 send_telegram(msg)
 
 if __name__ == "__main__":
-    bot = LivePaperTraderBot()
-    print("[BOT] Nifty 15m Black-Scholes Autonomous Paper Trader Initialized")
-    bot.run_cycle()
+    bot = LivePaperTraderNonTrailingBot()
+    print("[BOT] Autonomous Live Paper Trader Started (Fixed SL/TP Model)")
+    send_telegram("🤖 *Nifty Autonomous Live Trader Online*\nStrategy: Fixed SL (-35 Pts) & Target (+150 Pts)\nMonitoring 15m Market Candles...")
+    
+    # Continuous 60s live cycle loop
+    while True:
+        try:
+            bot.run_cycle()
+        except Exception as e:
+            print(f"Cycle error: {e}")
+        time.sleep(60)

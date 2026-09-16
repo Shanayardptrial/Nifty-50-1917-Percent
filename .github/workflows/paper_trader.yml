@@ -6,6 +6,9 @@ on:
     - cron: '*/15 3-10 * * 1-5'
   workflow_dispatch: # Allows manual trigger anytime from GitHub UI
 
+permissions:
+  contents: write
+
 jobs:
   run-paper-trader:
     runs-on: ubuntu-latest
@@ -24,14 +27,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy
 
-      - name: Run Live Paper Trader Bot
+      - name: Run Live Paper Trader Bot (Top Non-Trailing Model)
         run: |
-          python live_paper_trader_bot.py
+          python non_trailing_sl_version/live_paper_trader_non_trailing.py
 
       - name: Commit & Push Updated Trade State & Logs
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bot_state.json live_paper_trades.csv
+          git add non_trailing_sl_version/bot_state_non_trailing.json non_trailing_sl_version/live_paper_trades_non_trailing.csv
           git commit -m "Auto-update live paper trade logs [skip ci]" || exit 0
           git push
