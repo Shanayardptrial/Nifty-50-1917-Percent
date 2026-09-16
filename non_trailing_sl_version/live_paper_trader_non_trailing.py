@@ -26,7 +26,10 @@ def std_norm_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 def send_telegram(message):
-    print(f"\n[ALERT] {message}")
+    try:
+        print(f"\n[ALERT] {message.encode('ascii', 'ignore').decode('ascii')}")
+    except Exception:
+        pass
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
